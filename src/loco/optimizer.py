@@ -6,7 +6,7 @@ from typing import Optional
 import mip
 import numpy as np
 
-from loco.base import ProblemData, ProblemSolution, Facility, SupplySchedule, SolveInfo
+from loco.base import ProblemData, ProblemSolution, Facility, SupplySchedule, SolveInfo, DemandCentre
 
 
 @dataclass
@@ -174,7 +174,16 @@ class FacilityLocationOptimizer:
                 for i, facility_candidate in enumerate(data.facility_candidates)
                 if variables.used[i].x > self.tol
             ],
-            demand_centres=data.demand_centers,
+            demand_centres=[
+                DemandCentre(
+                    name=demand_center.name,
+                    location=demand_center.location,
+                    demand_fixed=demand_center.demand_fixed,
+                    demand_variable=demand_center.demand_variable,
+                    unmet_demand=variables.unmet_demand[j] if data.n_periods > 1 else variables.unmet_demand[j][0]
+                )
+                for j, demand_center in enumerate(data.demand_centers)
+            ] if data.relax_demand_constraints else data.demand_centers,
             supply_schedules=[
                 SupplySchedule(
                     facility_name=facility_candidate.name,
@@ -186,9 +195,6 @@ class FacilityLocationOptimizer:
                 for j, demand_center in data.demand_centers
                 if variables.supply[i, j].max() > self.tol
             ],
-            unmet_demand={
-
-            },
             unused_facility_candidates=[
                 facility_candidate for i, facility_candidate in data.facility_candidates
                 if not variables.used[i].x > self.tol

@@ -68,6 +68,7 @@ class DemandCentre:
     location: Location
     demand_variable: Optional[np.ndarray] = None
     demand_fixed: float = 0.
+    unmet_demand: Optional[Union[float, np.ndarray]] = None
 
     def __post_init__(self):
         if self.demand_variable is not None:
@@ -76,6 +77,12 @@ class DemandCentre:
             assert self.demand_fixed >= 0
         else:
             assert self.demand_fixed > 0
+        if self.unmet_demand is not None:
+            assert np.all(self.demand >= self.unmet_demand >= 0)
+
+    @property
+    def demand(self) -> Union[float, np.ndarray]:
+        return self.demand_fixed + (self.demand_variable if self.demand_variable is not None else 0)
 
     @property
     def n_periods(self) -> int:
@@ -166,7 +173,6 @@ class ProblemSolution:
     facilities: List[Facility]
     demand_centres: List[DemandCentre]
     supply_schedules: List[SupplySchedule]
-    unmet_demand: Dict[str, Union[float, np.ndarray]]
     unused_facility_candidates: List[FacilityCandidate]
     solve_info: SolveInfo
 
