@@ -1,8 +1,8 @@
 from setuptools import setup
 
 setup(
-    name="loco",
-    packages=["loco"],
+    name="flop",
+    packages=["flop"],
     package_dir={"": "src"},
     author="Josh Ivanhoe"
 )

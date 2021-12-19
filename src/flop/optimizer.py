@@ -6,7 +6,7 @@ from typing import Optional
 import mip
 import numpy as np
 
-from loco.base import ProblemData, ProblemSolution, Facility, SupplySchedule, SolveInfo, DemandCentre
+from flop.base import ProblemData, ProblemSolution, Facility, SupplySchedule, SolveInfo, DemandCentre
 
 
 @dataclass
