@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 import mip
-import numpy as np
+import pandas as pd
 
-from flop.base import ProblemData, ProblemSolution, Facility, SupplySchedule, SolveInfo, DemandCentre
+from flop.base import ProblemData, ProblemSolution, SolveInfo
 
 
 @dataclass
@@ -21,12 +21,12 @@ class FacilityLocationVariables:
 
     def __post_init__(self):
         for variable, ndim_expected, shape_expected in [
-            (self.capex.ndim, 1, (None,)),
-            (self.capacity.ndim, 1, self.capex.shape),
-            (self.capex.ndim, 2, (self.capex.shape[0], None)),
-            (self.opex.ndim, 3, (self.capex.shape[0], None, self.capex.shape[1])),
-            (self.supply.ndim, 3, self.opex.shape),
-            (self.unmet_demand.ndim, 2, self.opex.shape[1:])
+            (self.used, 1, (None,)),
+            (self.capacity, 1, self.used.shape),
+            (self.capex, 2, (self.capex.shape[0], None)),
+            (self.opex, 3, (self.capex.shape[0], None, self.capex.shape[1])),
+            (self.supply, 3, self.opex.shape),
+            (self.unmet_demand, 2, self.opex.shape[1:])
         ]:
             assert variable.ndim == ndim_expected
             for i, expected in enumerate(shape_expected):
@@ -39,7 +39,7 @@ class FacilityLocationVariables:
         n_facility_candidates = len(data.facility_candidates)
         n_demand_centers = len(data.demand_centers)
         return cls(
-            used=model.add_var_tensor(shape=(n_facility_candidates,), name="used"),
+            used=model.add_var_tensor(shape=(n_facility_candidates,), var_type=mip.BINARY, name="used"),
             capacity=model.add_var_tensor(shape=(n_facility_candidates,), name="size"),
             capex=model.add_var_tensor(shape=(n_facility_candidates, n_periods), name="capex"),
             opex=model.add_var_tensor(shape=(n_facility_candidates, n_demand_centers, n_periods), name="opex"),
@@ -66,19 +66,21 @@ class FacilityLocationOptimizer:
         self.tol = tol
         self.verbose = verbose
 
-    def optimize(self, data: ProblemData):
+    def solve(self, data: ProblemData) -> Optional[ProblemSolution]:
         model = self._setup_model()
         variables = self._define_variables(data=data, model=model)
         self._define_objective(data=data, model=model, variables=variables)
         self._add_constraints(data=data, model=model, variables=variables)
-        model.optimize(max_seconds=self.max_seconds, max_seconds_same_incumbent=self.max_seconds_same_incumbent)
+        self._optimize(model=model)
         return self._unpack_solution(data=data, model=model, variables=variables)
 
     def _setup_model(self) -> mip.Model:
-        model = mip.Model(sense=mip.MINIMIZE, solver_name=self.solver_name)
+        model = mip.Model(sense=mip.MINIMIZE, **(dict(solver_name=self.solver_name) if self.solver_name else dict()))
         if self.max_mip_gap is not None:
             model.max_mip_gap = self.max_mip_gap
         model.store_search_progress_log = True
+        if not self.verbose:
+            model.verbose = 0
         return model
 
     @staticmethod
@@ -96,12 +98,12 @@ class FacilityLocationOptimizer:
     ) -> None:
         model.objective = mip.minimize(
             mip.xsum(
-                (data.discount_factor ** t) * mip.xsum(
-                    variables.capex[:, t]
-                    + variables.opex[:, :, t].flatten()
+                (data.discount_factor ** t) * (
+                    mip.xsum(variables.capex[:, t])
+                    + mip.xsum(variables.opex[:, :, t].flatten())
                     + (
-                        data.cost_unmet_demand * variables.unmet_demand[:, :, t].flatten()
-                        if data.relax_demand_constraints else 0
+                        data.cost_unmet_demand * mip.xsum(variables.unmet_demand[:, :, t].flatten())
+                        if data.cost_unmet_demand is not None else 0
                     )
                 )
                 for t in range(data.n_periods)
@@ -116,7 +118,7 @@ class FacilityLocationOptimizer:
     ) -> None:
 
         # Compute distance matrix
-        distances = data.calculate_distances()
+        distances = data.distances()
 
         for i, facility_candidate in enumerate(data.facility_candidates):
 
@@ -126,6 +128,9 @@ class FacilityLocationOptimizer:
 
             for t in range(data.n_periods):
 
+                # Add supply constraint
+                model.add_constr(mip.xsum(variables.supply[i, :, t]) <= variables.capacity[i])
+
                 # Add capex constraint
                 model.add_constr(
                     variables.capex[i, t]
@@ -133,75 +138,77 @@ class FacilityLocationOptimizer:
                     + facility_candidate.cost_fixed * variables.used[i]
                 )
 
-        for j, demand_center in enumerate(data.demand_centers):
-            for t in range(data.n_periods):
-
-                # Add unmet constraints
-                model.add_constr(
-                    variables.unmet_demand[j, t]
-                    == mip.xsum(variables.supply[:, j, t])
-                    - (demand_center.demand_variable[t] if demand_center.demand_variable is not None else 0)
-                )
-                if not data.relax_demand_constraints:
-                    model.add_constr(variables.unmet_demand == 0)
-
-                for i, facility_candidate in enumerate(data.facility_candidates):
+                for j, demand_center in enumerate(data.demand_centers):
 
                     # Add opex constraint
                     model.add_constr(
                         variables.opex[i, j, t] == data.cost_transport * distances[i, j] * variables.supply[i, j, t]
                     )
 
-                    # Add max radius constraint
-                    if facility_candidate.service_radius:
-                        if distances[i, j] > facility_candidate.service_radius:
-                            model.add_constr(variables.supply[i, j, t] == 0)
+                    # Add unmet constraints
+                    if not i:
+                        model.add_constr(
+                            variables.unmet_demand[j, t]
+                            == mip.xsum(variables.supply[:, j, t]) - demand_center.demand[t]
+                        )
+                        if data.cost_unmet_demand is None:
+                            model.add_constr(variables.unmet_demand[j, t] == 0)
 
+    def _optimize(self, model: mip.Model) -> None:
+        solve_params = dict()
+        if self.max_seconds is not None:
+            solve_params["max_seconds"] = self.max_seconds
+        if self.max_seconds_same_incumbent is not None:
+            solve_params["max_seconds_same_incumbent"] = self.max_seconds_same_incumbent
+        model.optimize(**solve_params)
+
+    @staticmethod
     def _unpack_solution(
-            self,
             data: ProblemData,
             model: mip.Model,
             variables: FacilityLocationVariables
-    ) -> ProblemSolution:
-        return ProblemSolution(
-            facilities=[
-                Facility(
-                    name=facility_candidate.name,
-                    location=facility_candidate.location,
-                    capacity=variables.capacity[i],
-                    service_radius=facility_candidate.service_radius
+    ) -> Optional[ProblemSolution]:
+        if model.status in (mip.OptimizationStatus.OPTIMAL, mip.OptimizationStatus.FEASIBLE):
+            return ProblemSolution(
+                facilities=pd.DataFrame(
+                    data=[
+                        {
+                            "facility": facility_candidate.name,
+                            "used": bool(round(variables.used[i].x)),
+                            "capacity": variables.capacity[i].x,
+                            "capex_per_period": variables.capex[i, 0].x
+                        }
+                        for i, facility_candidate in enumerate(data.facility_candidates)
+                    ]
+                ).set_index("facility"),
+                schedule=pd.DataFrame(
+                    data=[
+                        {
+                            "period": t,
+                            "facility": facility_candidate.name,
+                            "demand_center": demand_center.name,
+                            "supply": variables.supply[i, j, t].x,
+                            "opex": variables.opex[i, j, t].x
+                        }
+                        for i, facility_candidate in enumerate(data.facility_candidates)
+                        for j, demand_center in enumerate(data.demand_centers)
+                        for t in range(data.n_periods)
+                    ]
+                ).set_index(["facility", "demand_center", "period"]),
+                unmet_demand=pd.DataFrame(
+                    data=[
+                        {
+                            "period": t,
+                            "demand_center": demand_center.name,
+                            "unmet_demand": variables.unmet_demand[j, t].x
+                        }
+                        for j, demand_center in enumerate(data.demand_centers)
+                        for t in range(data.n_periods)
+                    ]
+                ).set_index(["demand_center", "period"]),
+                solve_info=SolveInfo(
+                    status=model.status,
+                    progress_log=model.search_progress_log,
+                    gap=model.gap
                 )
-                for i, facility_candidate in enumerate(data.facility_candidates)
-                if variables.used[i].x > self.tol
-            ],
-            demand_centres=[
-                DemandCentre(
-                    name=demand_center.name,
-                    location=demand_center.location,
-                    demand_fixed=demand_center.demand_fixed,
-                    demand_variable=demand_center.demand_variable,
-                    unmet_demand=variables.unmet_demand[j] if data.n_periods > 1 else variables.unmet_demand[j][0]
-                )
-                for j, demand_center in enumerate(data.demand_centers)
-            ] if data.relax_demand_constraints else data.demand_centers,
-            supply_schedules=[
-                SupplySchedule(
-                    facility_name=facility_candidate.name,
-                    demand_center_name=demand_center.name,
-                    supply=np.array([s.x for s in variables.supply[i, j]])
-                    if data.n_periods > 1 else variables.supply[i, j, 0],
-                )
-                for i, facility_candidate in data.facility_candidates
-                for j, demand_center in data.demand_centers
-                if variables.supply[i, j].max() > self.tol
-            ],
-            unused_facility_candidates=[
-                facility_candidate for i, facility_candidate in data.facility_candidates
-                if not variables.used[i].x > self.tol
-            ],
-            solve_info=SolveInfo(
-                status=model.status,
-                progress_log=model.search_progress_log,
-                gap=model.gap,
             )
-        )

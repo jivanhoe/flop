@@ -1,3 +1,6 @@
+pandas
+shapely
+folium
 mip
 numpy
 haversine
