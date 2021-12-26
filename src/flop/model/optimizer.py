@@ -6,7 +6,7 @@ from typing import Optional
 import mip
 import pandas as pd
 
-from flop.base import ProblemData, ProblemSolution, SolveInfo
+from flop.model.base import ProblemData, ProblemSolution, SolveInfo
 
 
 @dataclass

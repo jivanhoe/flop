@@ -1,7 +1,7 @@
 import folium
 import numpy as np
 
-from flop.base import ProblemData, ProblemSolution, Location
+from flop.model.base import ProblemData, ProblemSolution, Location
 from typing import Optional
 
 

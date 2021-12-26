@@ -1,16 +1,16 @@
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 import numpy as np
 from shapely.geometry.polygon import Polygon as Polygon, Point
 
-from flop.base import DemandCentre, FacilityCandidate, Location, ProblemData
+from flop.model.base import DemandCentre, FacilityCandidate, Location, ProblemData
 
 
 class ProblemFactory:
 
     def __init__(
             self,
-            polygon: Polygon,
+            bounds: List[Location],
             n_periods: int = 12,
             n_facility_candidates: int = 20,
             n_demand_centers: int = 10,
@@ -22,7 +22,7 @@ class ProblemFactory:
             cost_unmet_demand: Optional[float] = None,
             discount_factor: float = 1.
     ):
-        self.polygon = polygon
+        self.bounds = Polygon([(location.lon, location.lat) for location in bounds])
         self.n_periods = n_periods
         self.n_facility_candidates = n_facility_candidates
         self.n_demand_centers = n_demand_centers
@@ -35,11 +35,11 @@ class ProblemFactory:
         self.discount_factor = discount_factor
 
     def sample_location(self) -> Location:
-        lon_min, lat_min, lon_max, lat_max = self.polygon.bounds
+        lon_min, lat_min, lon_max, lat_max = self.bounds.bounds
         while True:
             lat = self._sample_uniform(low=lat_min, high=lat_max)
             lon = np.random.uniform(low=lon_min, high=lon_max)
-            if self.polygon.contains(other=Point(lon, lat)):
+            if self.bounds.contains(other=Point(lon, lat)):
                 return Location(lat=lat, lon=lon)
 
     def sample_demand_center(self, name: str) -> DemandCentre:
