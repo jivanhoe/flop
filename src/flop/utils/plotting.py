@@ -1,11 +1,11 @@
 import folium
 import numpy as np
 
-from flop.model.base import ProblemData, ProblemSolution, Location
+from flop.model.base import Problem, Result, Location
 from typing import Optional
 
 
-def get_map_centre(data: ProblemData) -> Location:
+def get_map_centre(data: Problem) -> Location:
     return Location(
         lat=np.mean(
             [facility_candidate.location.lat for facility_candidate in data.facility_candidates]
@@ -18,11 +18,11 @@ def get_map_centre(data: ProblemData) -> Location:
     )
 
 
-def make_map(data: ProblemData) -> folium.Map:
+def make_map(data: Problem) -> folium.Map:
     return folium.Map(location=get_map_centre(data=data).to_tuple(), zoom_start=7)
 
 
-def add_demand_centres_to_map(m: folium.Map, data: ProblemData, solution: Optional[ProblemSolution] = None) -> None:
+def add_demand_centres_to_map(m: folium.Map, data: Problem, solution: Optional[Result] = None) -> None:
     for demand_center in data.demand_centers:
         popup_text = (
             f"Name: {demand_center.name}<br>"
@@ -40,8 +40,8 @@ def add_demand_centres_to_map(m: folium.Map, data: ProblemData, solution: Option
 
 def add_facilities_to_map(
         m: folium.Map,
-        data: ProblemData,
-        solution: Optional[ProblemSolution] = None,
+        data: Problem,
+        solution: Optional[Result] = None,
         show_unused_facilities: bool = True
 ) -> None:
     for facility in data.facility_candidates:
@@ -75,7 +75,7 @@ def add_facilities_to_map(
         ).add_to(m)
 
 
-def add_supply_routes_to_map(m: folium.Map, data: ProblemData, solution: ProblemSolution) -> None:
+def add_supply_routes_to_map(m: folium.Map, data: Problem, solution: Result) -> None:
     for facility in data.facility_candidates:
         for demand_center in data.demand_centers:
             supply = solution.schedule.loc[facility.name, demand_center.name]["supply"]
@@ -90,14 +90,14 @@ def add_supply_routes_to_map(m: folium.Map, data: ProblemData, solution: Problem
                 ).add_to(m)
 
 
-def plot_problem(data: ProblemData) -> folium.Map:
+def plot_problem(data: Problem) -> folium.Map:
     m = make_map(data=data)
     add_demand_centres_to_map(m=m, data=data)
     add_facilities_to_map(m=m, data=data)
     return m
 
 
-def plot_solution(data: ProblemData, solution: ProblemSolution, show_unused_facilities: bool = True) -> folium.Map:
+def plot_solution(data: Problem, solution: Result, show_unused_facilities: bool = True) -> folium.Map:
     m = make_map(data=data)
     add_demand_centres_to_map(m=m, data=data, solution=solution)
     add_facilities_to_map(m=m, data=data, solution=solution, show_unused_facilities=show_unused_facilities)

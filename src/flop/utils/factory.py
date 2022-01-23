@@ -3,7 +3,7 @@ from typing import Optional, Union, List
 import numpy as np
 from shapely.geometry.polygon import Polygon as Polygon, Point
 
-from flop.model.base import DemandCentre, FacilityCandidate, Location, ProblemData
+from flop.model.base import DemandCentre, FacilityCandidate, Location, Problem
 
 
 class ProblemFactory:
@@ -64,7 +64,7 @@ class ProblemFactory:
             cost_variable=self._sample_truncnorm(mean=self.mean_cost_variable),
         )
 
-    def sample_problem(self, seed: Optional[int] = None, ensure_feasibility: bool = True) -> ProblemData:
+    def sample_problem(self, seed: Optional[int] = None, ensure_feasibility: bool = True) -> Problem:
 
         # Set seed
         if seed is not None:
@@ -93,7 +93,7 @@ class ProblemFactory:
                 total_unmet_demand -= facility_candidates[-1].capacity_max
                 i += 1
 
-        return ProblemData(
+        return Problem(
             demand_centers=demand_centers,
             facility_candidates=facility_candidates,
             cost_transport=self.cost_transport,

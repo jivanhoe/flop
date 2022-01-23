@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,23 +24,6 @@ class Location:
 
     def distance(self, other: Location) -> float:
         return haversine(point1=self.to_tuple(), point2=other.to_tuple())
-
-
-@dataclass
-class Facility:
-
-    name: str
-    location: Location
-    capacity: float
-    service_radius: Optional[float] = None
-
-    def __post_init__(self):
-        assert self.capacity > 0
-        if self.service_radius is not None:
-            assert self.service_radius > 0
-
-    def __hash__(self):
-        return self.name
 
 
 @dataclass
@@ -97,21 +80,7 @@ class DemandCentre:
 
 
 @dataclass
-class SupplySchedule:
-
-    demand_center_name: str
-    facility_name: str
-    supply: Union[np.ndarray, float]
-
-    def __post_init__(self):
-        if isinstance(self.supply, np.ndarray):
-            assert self.supply.min() >= 0
-        else:
-            assert self.supply > 0
-
-
-@dataclass
-class ProblemData:
+class Problem:
 
     facility_candidates: List[FacilityCandidate]
     demand_centers: List[DemandCentre]
@@ -166,7 +135,7 @@ class SolveInfo:
 
 
 @dataclass
-class ProblemSolution:
+class Result:
 
     facilities: pd.DataFrame
     schedule: pd.DataFrame

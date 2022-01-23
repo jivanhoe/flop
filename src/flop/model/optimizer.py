@@ -6,7 +6,7 @@ from typing import Optional
 import mip
 import pandas as pd
 
-from flop.model.base import ProblemData, ProblemSolution, SolveInfo
+from flop.model.base import Problem, Result, SolveInfo
 
 
 @dataclass
@@ -34,10 +34,10 @@ class FacilityLocationVariables:
                     assert variable.shape[i] == expected
 
     @classmethod
-    def from_data(cls, data: ProblemData, model: mip.Model) -> FacilityLocationVariables:
-        n_periods = data.n_periods
-        n_facility_candidates = len(data.facility_candidates)
-        n_demand_centers = len(data.demand_centers)
+    def from_problem(cls, problem: Problem, model: mip.Model) -> FacilityLocationVariables:
+        n_periods = problem.n_periods
+        n_facility_candidates = len(problem.facility_candidates)
+        n_demand_centers = len(problem.demand_centers)
         return cls(
             used=model.add_var_tensor(shape=(n_facility_candidates,), var_type=mip.BINARY, name="used"),
             capacity=model.add_var_tensor(shape=(n_facility_candidates,), name="size"),
@@ -66,13 +66,13 @@ class FacilityLocationOptimizer:
         self.tol = tol
         self.verbose = verbose
 
-    def solve(self, data: ProblemData) -> Optional[ProblemSolution]:
+    def solve(self, problem: Problem) -> Optional[Result]:
         model = self._setup_model()
-        variables = self._define_variables(data=data, model=model)
-        self._define_objective(data=data, model=model, variables=variables)
-        self._add_constraints(data=data, model=model, variables=variables)
+        variables = self._define_variables(problem=problem, model=model)
+        self._define_objective(problem=problem, model=model, variables=variables)
+        self._add_constraints(problem=problem, model=model, variables=variables)
         self._optimize(model=model)
-        return self._unpack_solution(data=data, model=model, variables=variables)
+        return self._unpack_solution(problem=problem, model=model, variables=variables)
 
     def _setup_model(self) -> mip.Model:
         model = mip.Model(sense=mip.MINIMIZE, **(dict(solver_name=self.solver_name) if self.solver_name else dict()))
@@ -85,48 +85,48 @@ class FacilityLocationOptimizer:
 
     @staticmethod
     def _define_variables(
-            data: ProblemData,
+            problem: Problem,
             model: mip.Model
     ) -> FacilityLocationVariables:
-        return FacilityLocationVariables.from_data(data=data, model=model)
+        return FacilityLocationVariables.from_problem(problem=problem, model=model)
 
     @staticmethod
     def _define_objective(
-            data: ProblemData,
+            problem: Problem,
             model: mip.Model,
             variables: FacilityLocationVariables
     ) -> None:
         model.objective = mip.minimize(
             mip.xsum(
-                (data.discount_factor ** t) * (
+                (problem.discount_factor ** t) * (
                     mip.xsum(variables.capex[:, t])
                     + mip.xsum(variables.opex[:, :, t].flatten())
                     + (
-                        data.cost_unmet_demand * mip.xsum(variables.unmet_demand[:, :, t].flatten())
-                        if data.cost_unmet_demand is not None else 0
+                        problem.cost_unmet_demand * mip.xsum(variables.unmet_demand[:, :, t].flatten())
+                        if problem.cost_unmet_demand is not None else 0
                     )
                 )
-                for t in range(data.n_periods)
+                for t in range(problem.n_periods)
             )
         )
 
     @staticmethod
     def _add_constraints(
-            data: ProblemData,
+            problem: Problem,
             model: mip.Model,
             variables: FacilityLocationVariables
     ) -> None:
 
         # Compute distance matrix
-        distances = data.distances()
+        distances = problem.distances()
 
-        for i, facility_candidate in enumerate(data.facility_candidates):
+        for i, facility_candidate in enumerate(problem.facility_candidates):
 
             # Add facility size constraints
             model.add_constr(variables.capacity[i] <= facility_candidate.capacity_max * variables.used[i])
             model.add_constr(variables.capacity[i] >= facility_candidate.capacity_min * variables.used[i])
 
-            for t in range(data.n_periods):
+            for t in range(problem.n_periods):
 
                 # Add supply constraint
                 model.add_constr(mip.xsum(variables.supply[i, :, t]) <= variables.capacity[i])
@@ -138,11 +138,11 @@ class FacilityLocationOptimizer:
                     + facility_candidate.cost_fixed * variables.used[i]
                 )
 
-                for j, demand_center in enumerate(data.demand_centers):
+                for j, demand_center in enumerate(problem.demand_centers):
 
                     # Add opex constraint
                     model.add_constr(
-                        variables.opex[i, j, t] == data.cost_transport * distances[i, j] * variables.supply[i, j, t]
+                        variables.opex[i, j, t] == problem.cost_transport * distances[i, j] * variables.supply[i, j, t]
                     )
 
                     # Add unmet constraints
@@ -151,7 +151,7 @@ class FacilityLocationOptimizer:
                             variables.unmet_demand[j, t]
                             == mip.xsum(variables.supply[:, j, t]) - demand_center.demand[t]
                         )
-                        if data.cost_unmet_demand is None:
+                        if problem.cost_unmet_demand is None:
                             model.add_constr(variables.unmet_demand[j, t] == 0)
 
     def _optimize(self, model: mip.Model) -> None:
@@ -164,12 +164,12 @@ class FacilityLocationOptimizer:
 
     @staticmethod
     def _unpack_solution(
-            data: ProblemData,
+            problem: Problem,
             model: mip.Model,
             variables: FacilityLocationVariables
-    ) -> Optional[ProblemSolution]:
+    ) -> Optional[Result]:
         if model.status in (mip.OptimizationStatus.OPTIMAL, mip.OptimizationStatus.FEASIBLE):
-            return ProblemSolution(
+            return Result(
                 facilities=pd.DataFrame(
                     data=[
                         {
@@ -178,7 +178,7 @@ class FacilityLocationOptimizer:
                             "capacity": variables.capacity[i].x,
                             "capex_per_period": variables.capex[i, 0].x
                         }
-                        for i, facility_candidate in enumerate(data.facility_candidates)
+                        for i, facility_candidate in enumerate(problem.facility_candidates)
                     ]
                 ).set_index("facility"),
                 schedule=pd.DataFrame(
@@ -190,9 +190,9 @@ class FacilityLocationOptimizer:
                             "supply": variables.supply[i, j, t].x,
                             "opex": variables.opex[i, j, t].x
                         }
-                        for i, facility_candidate in enumerate(data.facility_candidates)
-                        for j, demand_center in enumerate(data.demand_centers)
-                        for t in range(data.n_periods)
+                        for i, facility_candidate in enumerate(problem.facility_candidates)
+                        for j, demand_center in enumerate(problem.demand_centers)
+                        for t in range(problem.n_periods)
                     ]
                 ).set_index(["facility", "demand_center", "period"]),
                 unmet_demand=pd.DataFrame(
@@ -202,8 +202,8 @@ class FacilityLocationOptimizer:
                             "demand_center": demand_center.name,
                             "unmet_demand": variables.unmet_demand[j, t].x
                         }
-                        for j, demand_center in enumerate(data.demand_centers)
-                        for t in range(data.n_periods)
+                        for j, demand_center in enumerate(problem.demand_centers)
+                        for t in range(problem.n_periods)
                     ]
                 ).set_index(["demand_center", "period"]),
                 solve_info=SolveInfo(

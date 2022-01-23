@@ -1,6 +1,6 @@
 import pytest
 
-from flop.model.base import Location, ProblemData
+from flop.model.base import Location, Problem
 from flop.model.optimizer import FacilityLocationOptimizer
 from flop.utils.factory import ProblemFactory
 
@@ -19,7 +19,7 @@ def factory(request) -> ProblemFactory:
 
 
 @pytest.fixture(params=range(3))
-def data(factory: ProblemFactory, request) -> ProblemData:
+def data(factory: ProblemFactory, request) -> Problem:
     return factory.sample_problem(ensure_feasibility=True, seed=request.param)
 
 
