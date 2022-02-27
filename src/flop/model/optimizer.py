@@ -118,7 +118,7 @@ class FacilityLocationOptimizer:
     ) -> None:
 
         # Compute distance matrix
-        distances = problem.distances()
+        distances = problem.compute_distances()
 
         for i, facility_candidate in enumerate(problem.facility_candidates):
 

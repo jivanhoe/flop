@@ -104,3 +104,6 @@ def plot_solution(data: Problem, solution: Result, show_unused_facilities: bool 
     add_supply_routes_to_map(m=m, data=data, solution=solution)
     return m
 
+
+def plot_costs(solution: Result):
+    solution.schedule.plot.bar()
